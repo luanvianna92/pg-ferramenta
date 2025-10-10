@@ -162,7 +162,7 @@
                 <div class="bg-white p-6 rounded-lg shadow-md">
                     <h2 class="text-xl font-semibold mb-4 border-b pb-2">Histórico de Transações</h2>
                     <!-- Filtros -->
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-4 items-end">
                         <div>
                             <label class="block text-sm font-medium text-gray-700">Pagador</label>
                             <select id="filter-payer" class="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
@@ -176,6 +176,14 @@
                             </select>
                         </div>
                          <div>
+                            <label class="block text-sm font-medium text-gray-700">Tipo</label>
+                            <select id="filter-type" class="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                                <option value="">Todos</option>
+                                <option value="payment">Pagamentos</option>
+                                <option value="withdrawal">Saques</option>
+                            </select>
+                        </div>
+                         <div>
                             <label class="block text-sm font-medium text-gray-700">Data</label>
                             <input type="date" id="filter-date" class="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
                         </div>
@@ -183,7 +191,7 @@
                             <label class="block text-sm font-medium text-gray-700">NF</label>
                              <input type="text" id="filter-invoice" placeholder="Buscar NF..." class="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
                         </div>
-                        <div class="flex items-end">
+                        <div>
                             <button id="clear-filters-btn" class="w-full bg-gray-500 text-white py-2 rounded-md hover:bg-gray-600 transition">Limpar Filtros</button>
                         </div>
                     </div>
@@ -220,8 +228,13 @@
             <h3 class="text-lg font-medium leading-6 text-gray-900" id="modal-title">Confirmar Exclusão</h3>
             <div class="mt-2">
                 <p class="text-sm text-gray-500">
-                    Você tem certeza que deseja excluir esta transação? Esta ação não pode ser desfeita.
+                    Para excluir esta transação, por favor, insira a senha mestre. Esta ação não pode ser desfeita.
                 </p>
+                 <div class="mt-4">
+                    <label for="delete-transaction-password" class="block text-sm font-medium text-gray-700">Senha Mestre</label>
+                    <input type="password" id="delete-transaction-password" class="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    <p id="delete-transaction-error" class="text-red-500 text-xs mt-1 hidden">Senha incorreta.</p>
+                </div>
             </div>
             <div class="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
                 <button id="confirm-delete-btn" type="button" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none sm:col-start-2 sm:text-sm">
@@ -259,6 +272,11 @@
                 <div>
                     <label class="block text-sm font-medium text-gray-700">Descrição</label>
                     <input type="text" id="edit-transaction-description" class="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                 <div class="border-t pt-4">
+                    <label for="edit-transaction-password" class="block text-sm font-medium text-gray-700">Senha Mestre para Salvar</label>
+                    <input type="password" id="edit-transaction-password" class="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    <p id="edit-transaction-error" class="text-red-500 text-xs mt-1 hidden">Senha incorreta.</p>
                 </div>
             </form>
             <div class="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
@@ -379,11 +397,14 @@
         const filterReceiver = document.getElementById('filter-receiver');
         const filterInvoice = document.getElementById('filter-invoice');
         const filterDate = document.getElementById('filter-date');
+        const filterType = document.getElementById('filter-type');
         const clearFiltersBtn = document.getElementById('clear-filters-btn');
         const resetAllBtn = document.getElementById('reset-all-btn');
         
         // Modal de Exclusão de Transação
         const modal = document.getElementById('confirmation-modal');
+        const deleteTransactionPasswordInput = document.getElementById('delete-transaction-password');
+        const deleteTransactionError = document.getElementById('delete-transaction-error');
         const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
         const cancelDeleteBtn = document.getElementById('cancel-delete-btn');
 
@@ -394,6 +415,8 @@
         const editTransactionAmountInput = document.getElementById('edit-transaction-amount');
         const editInvoiceNumberInput = document.getElementById('edit-invoice-number');
         const editTransactionDescriptionInput = document.getElementById('edit-transaction-description');
+        const editTransactionPasswordInput = document.getElementById('edit-transaction-password');
+        const editTransactionError = document.getElementById('edit-transaction-error');
         const saveEditBtn = document.getElementById('save-edit-btn');
         const cancelEditBtn = document.getElementById('cancel-edit-btn');
         
@@ -500,7 +523,9 @@
             renderTransactionHistory();
             renderAllocationChart(balances);
             // Preenche o select do painel de retirada
+            const currentWithdrawalCompany = withdrawalCompanySelect.value;
             withdrawalCompanySelect.innerHTML = '<option value="">-- Selecione --</option>' + companies.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+            withdrawalCompanySelect.value = currentWithdrawalCompany;
         }
         
         function calculateBalances() {
@@ -523,8 +548,10 @@
                 if(t.type === 'withdrawal') {
                     if (!balances[t.payer]) return;
                     balances[t.payer].total -= t.amount;
-                    for(const [source, withdrawnAmount] of Object.entries(t.sourceBreakdown)) {
-                        balances[t.payer].from[source] = (balances[t.payer].from[source] || 0) - withdrawnAmount;
+                    if(t.sourceBreakdown){
+                        for(const [source, withdrawnAmount] of Object.entries(t.sourceBreakdown)) {
+                            balances[t.payer].from[source] = (balances[t.payer].from[source] || 0) - withdrawnAmount;
+                        }
                     }
 
                 } else { // Regular transaction
@@ -538,7 +565,11 @@
                     const receiverBalance = balances[receiverName];
                     const payerTotalFrom = Object.values(payerBalance.from).reduce((sum, val) => sum + val, 0);
 
-                    if (payerTotalFrom <= 0) return;
+                    if (payerTotalFrom < amount - 0.01) { // Guard against spending more than available
+                         console.warn(`Tentativa de gastar ${amount} de ${payerName}, mas apenas ${payerTotalFrom} disponível.`);
+                         return; // Skip transaction if not enough funds
+                    }
+
 
                     const transferBreakdown = {};
                     for (const [originCompany, originAmount] of Object.entries(payerBalance.from)) {
@@ -643,29 +674,47 @@
             const receiverFilter = filterReceiver.value;
             const invoiceFilter = filterInvoice.value.toLowerCase();
             const dateFilter = filterDate.value;
+            const typeFilter = filterType.value;
+            
+            // Cria um mapa de ID para número sequencial para manter a numeração consistente
+            const transactionNumbers = new Map();
+            [...transactions]
+                .sort((a, b) => (a.timestamp?.toDate() || 0) - (b.timestamp?.toDate() || 0))
+                .forEach((t, index) => transactionNumbers.set(t.id, index + 1));
 
             const filteredTransactions = transactions.filter(t => {
                 const payerMatch = !payerFilter || t.payer === payerFilter;
                 const receiverMatch = !receiverFilter || t.receiver === receiverFilter;
                 const invoiceMatch = !invoiceFilter || (t.invoice && t.invoice.toLowerCase().includes(invoiceFilter));
+                const typeMatch = !typeFilter || (typeFilter === 'withdrawal' && t.type === 'withdrawal') || (typeFilter === 'payment' && t.type !== 'withdrawal');
+                
                 let dateMatch = true;
                 if (dateFilter && t.timestamp && t.timestamp.toDate) {
                     const transactionDate = t.timestamp.toDate().toISOString().split('T')[0];
                     dateMatch = transactionDate === dateFilter;
                 }
                 
-                return payerMatch && receiverMatch && invoiceMatch && dateMatch;
+                return payerMatch && receiverMatch && invoiceMatch && dateMatch && typeMatch;
             }).sort((a, b) => (b.timestamp?.toDate() || 0) - (a.timestamp?.toDate() || 0)); 
 
-            transactionHistory.innerHTML = filteredTransactions.map((t, index) => `
+            transactionHistory.innerHTML = filteredTransactions.map((t, index) => {
+                let descriptionText = t.description || '';
+                if(t.type === 'withdrawal' && t.sourceBreakdown){
+                    const sourceDetails = Object.entries(t.sourceBreakdown)
+                        .map(([source, amount]) => `Origem ${source}: ${formatCurrency(amount)}`)
+                        .join(', ');
+                    descriptionText += ` (${sourceDetails})`;
+                }
+
+                return `
                 <tr class="text-sm ${t.type === 'withdrawal' ? 'text-red-600' : ''}">
-                    <td class="px-2 py-3 text-gray-500">${index + 1}</td>
+                    <td class="px-2 py-3 text-gray-500">${transactionNumbers.get(t.id)}</td>
                     <td class="px-4 py-3 text-gray-500">${formatTimestamp(t.timestamp)}</td>
                     <td class="px-4 py-3">${t.payer}</td>
                     <td class="px-4 py-3">${t.receiver}</td>
                     <td class="px-4 py-3 font-medium ${t.type === 'withdrawal' ? 'text-red-600' : 'text-gray-900'}">${formatCurrency(t.amount)}</td>
                     <td class="px-4 py-3 text-gray-500">${t.invoice || ''}</td>
-                    <td class="px-4 py-3 text-gray-500 truncate" title="${t.description || ''}">${(t.description || '').substring(0,20)}${(t.description || '').length > 20 ? '...' : ''}</td>
+                    <td class="px-4 py-3 text-gray-500" title="${descriptionText}">${descriptionText.substring(0,30)}${descriptionText.length > 30 ? '...' : ''}</td>
                     <td class="px-4 py-3">
                         <div class="flex items-center space-x-3">
                              ${t.type !== 'withdrawal' ? `
@@ -679,7 +728,7 @@
                         </div>
                     </td>
                 </tr>
-            `).join('');
+                `}).join('');
 
             const totalAmount = filteredTransactions.filter(t => t.type !== 'withdrawal').reduce((sum, t) => sum + t.amount, 0);
             const totalWithdrawals = filteredTransactions.filter(t => t.type === 'withdrawal').reduce((sum, t) => sum + t.amount, 0);
@@ -820,6 +869,7 @@
             }
 
             await addDoc(collection(db, 'transactions'), {
+                type: 'payment',
                 payer, receiver, amount, invoice, description, timestamp: new Date()
             });
 
@@ -853,12 +903,15 @@
         filterReceiver.addEventListener('change', renderTransactionHistory);
         filterInvoice.addEventListener('input', renderTransactionHistory);
         filterDate.addEventListener('change', renderTransactionHistory);
+        filterType.addEventListener('change', renderTransactionHistory);
+
 
         clearFiltersBtn.addEventListener('click', () => {
             filterPayer.value = '';
             filterReceiver.value = '';
             filterInvoice.value = '';
             filterDate.value = '';
+            filterType.value = '';
             renderTransactionHistory();
         });
         
@@ -866,6 +919,8 @@
             const deleteTransactionBtn = e.target.closest('.delete-transaction-btn');
             if (deleteTransactionBtn) {
                 transactionToDeleteId = deleteTransactionBtn.dataset.id;
+                deleteTransactionPasswordInput.value = '';
+                deleteTransactionError.classList.add('hidden');
                 modal.style.display = 'flex';
             }
 
@@ -879,6 +934,8 @@
                     editTransactionAmountInput.value = (transaction.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
                     editInvoiceNumberInput.value = transaction.invoice;
                     editTransactionDescriptionInput.value = transaction.description;
+                    editTransactionPasswordInput.value = '';
+                    editTransactionError.classList.add('hidden');
                     editModal.style.display = 'flex';
                 }
             }
@@ -901,11 +958,17 @@
         });
 
         confirmDeleteBtn.addEventListener('click', async () => {
-            if (transactionToDeleteId) {
-                await deleteDoc(doc(db, "transactions", transactionToDeleteId));
-                transactionToDeleteId = null;
-                modal.style.display = 'none';
+            if (!transactionToDeleteId) return;
+
+            const password = deleteTransactionPasswordInput.value;
+            if(password !== 'Pipueca') {
+                deleteTransactionError.classList.remove('hidden');
+                return;
             }
+
+            await deleteDoc(doc(db, "transactions", transactionToDeleteId));
+            transactionToDeleteId = null;
+            modal.style.display = 'none';
         });
         
         cancelEditBtn.addEventListener('click', () => {
@@ -916,6 +979,12 @@
         saveEditBtn.addEventListener('click', async () => {
             if (!transactionToEditId) return;
 
+            const password = editTransactionPasswordInput.value;
+            if(password !== 'Pipueca') {
+                editTransactionError.classList.remove('hidden');
+                return;
+            }
+            
             const payer = editPayerSelect.value;
             const receiver = editReceiverSelect.value;
             const amount = unformatCurrency(editTransactionAmountInput.value);
@@ -1062,7 +1131,7 @@
                 const amount = unformatCurrency(input.value);
 
                 if(amount > 0) {
-                    if (amount > maxAmount) {
+                    if (amount > maxAmount + 0.01) { // Add tolerance for floating point
                         alert(`O valor de saque da fonte ${sourceName} (${formatCurrency(amount)}) não pode exceder o valor disponível (${formatCurrency(maxAmount)}).`);
                         hasError = true;
                     }
