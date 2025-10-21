@@ -81,8 +81,8 @@
 
                 <!-- Controle de Aportes -->
                 <div class="bg-white p-6 rounded-lg shadow-md">
-                    <h2 class="text-xl font-semibold mb-4 border-b pb-2">2. Adicionar Aporte</h2>
-                    <p class="text-sm text-gray-600 mb-4">Insira um valor para adicionar ao capital de uma empresa.</p>
+                    <h2 class="text-xl font-semibold mb-4 border-b pb-2">2. Registrar/Editar Aporte</h2>
+                    <p class="text-sm text-gray-600 mb-4">Defina o valor total que cada empresa irá movimentar. O valor é salvo automaticamente ao sair do campo.</p>
                     <div id="contributions-container" class="space-y-3">
                          <!-- Formulários de aporte por empresa serão gerados aqui -->
                     </div>
@@ -589,17 +589,18 @@
             const sortedTransactions = [...transactions].sort((a, b) => (a.timestamp?.toDate() || 0) - (b.timestamp?.toDate() || 0));
             
             sortedTransactions.forEach(t => {
-                if(t.type === 'contribution') {
-                    if (!balances[t.receiver]) return;
-                    balances[t.receiver].total += t.amount;
-                    balances[t.receiver].from[t.receiver] = (balances[t.receiver].from[t.receiver] || 0) + t.amount;
-                }
-                else if(t.type === 'withdrawal') {
-                    if (!balances[t.payer]) return;
-                    balances[t.payer].total -= t.amount;
-                    if(t.sourceBreakdown){
-                        for(const [source, withdrawnAmount] of Object.entries(t.sourceBreakdown)) {
-                            balances[t.payer].from[source] = (balances[t.payer].from[source] || 0) - withdrawnAmount;
+                if (t.type === 'contribution') {
+                    if (balances[t.receiver]) {
+                        balances[t.receiver].total += t.amount;
+                        balances[t.receiver].from[t.receiver] = (balances[t.receiver].from[t.receiver] || 0) + t.amount;
+                    }
+                } else if (t.type === 'withdrawal') {
+                    if (balances[t.payer]) {
+                        balances[t.payer].total -= t.amount;
+                        if (t.sourceBreakdown) {
+                            for (const [source, withdrawnAmount] of Object.entries(t.sourceBreakdown)) {
+                                balances[t.payer].from[source] = (balances[t.payer].from[source] || 0) - withdrawnAmount;
+                            }
                         }
                     }
                 } else if (t.type === 'adjustment') {
@@ -612,30 +613,32 @@
                     const receiverName = t.receiver;
                     const amount = t.amount;
 
-                    if (!balances[payerName] || !balances[receiverName]) return; 
+                    if (!balances[payerName] || !balances[receiverName]) return;
 
                     const payerBalance = balances[payerName];
                     const receiverBalance = balances[receiverName];
                     const payerTotalFrom = Object.values(payerBalance.from).reduce((sum, val) => sum + val, 0);
-                    
-                    if (payerTotalFrom < 0) return;
 
                     const transferBreakdown = {};
                     if (payerTotalFrom > 0) {
                         for (const [originCompany, originAmount] of Object.entries(payerBalance.from)) {
-                            if (originAmount > 0.001) {
+                            if (originAmount > 0) {
                                 const proportion = originAmount / payerTotalFrom;
                                 const transferAmountFromOrigin = amount * proportion;
                                 transferBreakdown[originCompany] = (transferBreakdown[originCompany] || 0) + transferAmountFromOrigin;
                             }
                         }
+                    } else {
+                        // This case handles payments even if the 'from' breakdown is negative or zero, preventing crashes.
+                        // It assumes the payment is valid and adjusts balances accordingly.
+                        transferBreakdown[payerName] = (transferBreakdown[payerName] || 0) + amount;
                     }
 
                     for (const [originCompany, transferAmount] of Object.entries(transferBreakdown)) {
                         payerBalance.from[originCompany] = (payerBalance.from[originCompany] || 0) - transferAmount;
                         receiverBalance.from[originCompany] = (receiverBalance.from[originCompany] || 0) + transferAmount;
                     }
-                    
+
                     payerBalance.total -= amount;
                     receiverBalance.total += amount;
                 }
