@@ -423,10 +423,9 @@
     <script type="module">
         // Importa as funções necessárias do SDK do Firebase
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-        import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, setDoc, getDoc, updateDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, setDoc, getDoc, updateDoc, getDocs, writeBatch, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
         // Configuração do Firebase da sua aplicação web
-        // ... (firebaseConfig)
         const firebaseConfig = {
             apiKey: "AIzaSyBcJmJfNlmx6-DpnQxTRtIP8icbxZYfD7Y",
             authDomain: "aplicativo-de-pagamento-giro.firebaseapp.com",
@@ -444,7 +443,7 @@
         // --- Estado da Aplicação ---
         let companies = [];
         let transactions = [];
-        let contributions = []; // Esta variável não será mais usada para cálculos, mas vamos mantê-la por enquanto para evitar quebrar a inicialização.
+        // A 'contributions' collection não é mais usada para cálculos, mas sim 'transactions' com type 'contribution'
         let transactionToDeleteId = null;
         let transactionToEditId = null;
         let companyToDelete = null;
@@ -454,8 +453,8 @@
         // --- Elementos do DOM ---
         const loginContainer = document.getElementById('login-container');
         const appContainer = document.getElementById('app-container');
+        const loginForm = document.getElementById('login-form');
         const loginError = document.getElementById('login-error');
-        const loginForm = document.getElementById('login-form'); // <-- CORREÇÃO ADICIONADA AQUI
         const companyNameInput = document.getElementById('company-name');
         const addCompanyBtn = document.getElementById('add-company-btn');
         const companyList = document.getElementById('company-list');
@@ -468,8 +467,14 @@
         const consolidatedBalance = document.getElementById('consolidated-balance');
         const transactionHistory = document.getElementById('transaction-history');
         const transactionHistoryFooter = document.getElementById('transaction-history-footer');
-        // const contributionsContainer = document.getElementById('contributions-container'); // ID não existe mais
-
+        
+        // Elementos de Aporte
+        const contributionCompanySelect = document.getElementById('contribution-company-select');
+        const contributionAmountInput = document.getElementById('contribution-amount');
+        const contributionDescriptionInput = document.getElementById('contribution-description');
+        const addContributionBtn = document.getElementById('add-contribution-btn');
+        const contributionSummaryList = document.getElementById('contribution-summary-list');
+        
         // Elementos de Filtro
         const filterPayer = document.getElementById('filter-payer');
         const filterReceiver = document.getElementById('filter-receiver');
@@ -478,22 +483,6 @@
         const filterType = document.getElementById('filter-type');
         const clearFiltersBtn = document.getElementById('clear-filters-btn');
         const resetAllBtn = document.getElementById('reset-all-btn'); 
-        
-        // Novos elementos de Aporte
-        const contributionCompanySelect = document.getElementById('contribution-company-select');
-        const contributionAmountInput = document.getElementById('contribution-amount');
-        const contributionDescriptionInput = document.getElementById('contribution-description');
-        const addContributionBtn = document.getElementById('add-contribution-btn');
-        const contributionSummaryList = document.getElementById('contribution-summary-list'); // NOVO
-
-        // Novos elementos de Ajuste Manual
-        const adjustCompanySelect = document.getElementById('adjust-company-select');
-        const adjustSourceSelect = document.getElementById('adjust-source-select');
-        const adjustAmountInput = document.getElementById('adjust-amount');
-        const adjustDescriptionInput = document.getElementById('adjust-description');
-        const adjustPasswordInput = document.getElementById('adjust-password');
-        const adjustError = document.getElementById('adjust-error');
-        const addAdjustmentBtn = document.getElementById('add-adjustment-btn');
         
         // Modal de Exclusão de Transação
         const modal = document.getElementById('confirmation-modal');
@@ -538,14 +527,25 @@
         // Resumo de Saques
         const withdrawalSummaryBody = document.getElementById('withdrawal-summary-body');
 
+        // Painel de Ajuste
+        const adjustCompanySelect = document.getElementById('adjust-company-select');
+        const adjustSourceSelect = document.getElementById('adjust-source-select');
+        const adjustAmountInput = document.getElementById('adjust-amount');
+        const adjustDescriptionInput = document.getElementById('adjust-description');
+        const adjustPasswordInput = document.getElementById('adjust-password');
+        const adjustError = document.getElementById('adjust-error');
+        const addAdjustmentBtn = document.getElementById('add-adjustment-btn');
+
 
         // --- Funções de Formatação ---
         const formatCurrency = (value) => {
             if (typeof value !== 'number') return '';
+            // Arredonda para 2 casas decimais para exibição
+            const roundedValue = Math.round(value * 100) / 100;
             return new Intl.NumberFormat('pt-BR', {
                 style: 'currency',
                 currency: 'BRL',
-            }).format(value);
+            }).format(roundedValue);
         };
         
         const formatTimestamp = (timestamp) => {
@@ -572,17 +572,21 @@
 
         const unformatCurrency = (value) => {
             if (typeof value !== 'string' || value === '') return 0;
-            return parseFloat(value.replace(/\./g, '').replace(',', '.'));
+            // Converte para centavos como inteiro
+            return Math.round(parseFloat(value.replace(/\./g, '').replace(',', '.')) * 100);
         };
-        
-        
+
+        // Converte centavos (inteiro) para float (reais)
+        const centsToFloat = (cents) => {
+            return cents / 100;
+        };
+
         // --- Lógica de Login ---
         loginForm.addEventListener('submit', (e) => {
             e.preventDefault();
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
 
-            // Substitua com um método de autenticação seguro em um aplicativo real
             if (username === 'Luan' && password === 'Giro123') {
                 loginContainer.classList.add('hidden');
                 appContainer.classList.remove('hidden');
@@ -594,7 +598,6 @@
 
         // --- Lógica Principal da Aplicação ---
         function initializeAppLogic() {
-            // Listeners do Firebase (tempo real)
             onSnapshot(collection(db, 'companies'), (snapshot) => {
                 companies = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => a.name.localeCompare(b.name));
                 renderAll();
@@ -604,10 +607,6 @@
                 transactions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 renderAll();
             });
-
-            /* REMOVIDO - Aportes agora são transações
-            // ...
-            */
         }
         
         // --- Funções de Renderização e Cálculo ---
@@ -615,127 +614,127 @@
             const balances = calculateBalances();
             renderCompanyList();
             renderSelectOptions();
-            // renderContributions(); // REMOVIDO
+            renderContributions(balances); 
             renderConsolidatedBalance(balances);
             renderTransactionHistory();
             renderAllocationChart(balances);
             renderWithdrawalSummary();
-            renderContributionSummary(balances); // NOVO
             
-            // Preenche o select do painel de retirada
-            const currentWithdrawalCompany = withdrawalCompanySelect.value;
             const companyOptions = companies.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+            
+            const currentWithdrawalCompany = withdrawalCompanySelect.value;
             withdrawalCompanySelect.innerHTML = '<option value="">-- Selecione --</option>' + companyOptions;
             withdrawalCompanySelect.value = currentWithdrawalCompany;
-
-            // Preenche os selects de aporte e ajuste
-            contributionCompanySelect.innerHTML = companyOptions;
             
-            const currentAdjustCompany = adjustCompanySelect.value;
-            adjustCompanySelect.innerHTML = '<option value="">-- Selecione a empresa --</option>' + companyOptions;
-            adjustCompanySelect.value = currentAdjustCompany;
+            contributionCompanySelect.innerHTML = '<option value="">-- Selecione --</option>' + companyOptions;
 
-            // Atualiza o select de origem do ajuste (se uma empresa estiver selecionada)
+            const currentAdjCompany = adjustCompanySelect.value;
+            adjustCompanySelect.innerHTML = '<option value="">-- Selecione a empresa --</option>' + companyOptions;
+            adjustCompanySelect.value = currentAdjCompany;
+
             updateAdjustSourceSelect(balances);
         }
         
         function calculateBalances() {
             const balances = {};
+            // Inicializa 'from' para todas as empresas, pois uma empresa pode ter
+            // fundos de outra antes mesmo de ter seu próprio aporte
             companies.forEach(c => {
                 balances[c.name] = { total: 0, from: {} };
             });
 
-            // 1. Ordena as transações por data para processar na ordem correta
             const sortedTransactions = [...transactions].sort((a, b) => (a.timestamp?.toDate() || 0) - (b.timestamp?.toDate() || 0));
             
-            // 2. Processa cada transação (Aportes, Saques, Pagamentos)
             sortedTransactions.forEach(t => {
-                
-                if (t.type === 'contribution') {
-                    // Lógica de Aporte
-                    const receiverName = t.receiver;
-                    if (balances[receiverName]) {
-                        balances[receiverName].total += t.amount;
-                        const fromMap = balances[receiverName].from;
-                        // A origem do aporte é a própria empresa
-                        fromMap[receiverName] = (fromMap[receiverName] || 0) + t.amount;
-                    }
+                // Converte valores para centavos para precisão absoluta
+                const amountInCents = Math.round(t.amount * 100);
 
-                } else if(t.type === 'withdrawal') {
-                    // Lógica para saque
-                    if (!balances[t.payer]) return;
-                    balances[t.payer].total -= t.amount;
-                    if(t.sourceBreakdown){
-                        for(const [source, withdrawnAmount] of Object.entries(t.sourceBreakdown)) {
-                            balances[t.payer].from[source] = (balances[t.payer].from[source] || 0) - withdrawnAmount;
+                if (t.type === 'contribution') {
+                    if (balances[t.receiver]) {
+                        balances[t.receiver].total += amountInCents;
+                        balances[t.receiver].from[t.receiver] = (balances[t.receiver].from[t.receiver] || 0) + amountInCents;
+                    }
+                } else if (t.type === 'withdrawal') {
+                    if (balances[t.payer] && t.sourceBreakdown) {
+                        balances[t.payer].total -= amountInCents;
+                        for (const [source, withdrawnAmount] of Object.entries(t.sourceBreakdown)) {
+                            const withdrawnAmountInCents = Math.round(withdrawnAmount * 100);
+                            balances[t.payer].from[source] = (balances[t.payer].from[source] || 0) - withdrawnAmountInCents;
                         }
                     }
-
                 } else if (t.type === 'adjustment') {
-                    // Os ajustes são tratados no passo 3, após o cálculo principal
-                    return; 
-                
-                } else { // Lógica para transação de pagamento (type 'payment' ou undefined)
+                    if (balances[t.companyToAdjust]) {
+                        const newAmountInCents = Math.round(t.newAmount * 100);
+                        const oldAmountInCents = balances[t.companyToAdjust].from[t.sourceToAdjust] || 0;
+                        const differenceInCents = newAmountInCents - oldAmountInCents;
+                        
+                        balances[t.companyToAdjust].from[t.sourceToAdjust] = newAmountInCents;
+                        balances[t.companyToAdjust].total += differenceInCents;
+                    }
+                } else { // 'payment'
                     const payerName = t.payer;
                     const receiverName = t.receiver;
-                    const amount = t.amount;
 
-                    if (!balances[payerName] || !balances[receiverName]) return; 
+                    if (!balances[payerName] || !balances[receiverName]) return;
 
                     const payerBalance = balances[payerName];
                     const receiverBalance = balances[receiverName];
-                    
-                    // Calcula o total positivo no 'from' do pagador para determinar proporções
-                    const positiveFromTotal = Object.values(payerBalance.from).reduce((sum, val) => val > 0 ? sum + val : sum, 0);
-                    
-                    if (positiveFromTotal < 0.001) return; // Não há fundos positivos para transferir
 
+                    // 1. Encontrar apenas as fontes com saldo positivo
+                    const positiveSources = Object.entries(payerBalance.from).filter(([_, value]) => value > 1); // Filtra saldos positivos ( > 1 centavo)
+                    const totalPositiveFromInCents = positiveSources.reduce((sum, [_, value]) => sum + value, 0);
+                    
                     const transferBreakdown = {};
-                    // Calcula quanto de cada origem será transferido
-                    for (const [originCompany, originAmount] of Object.entries(payerBalance.from)) {
-                        if (originAmount > 0) {
-                            const proportion = originAmount / positiveFromTotal;
-                            const transferAmountFromOrigin = amount * proportion;
-                            transferBreakdown[originCompany] = (transferBreakdown[originCompany] || 0) + transferAmountFromOrigin;
-                        }
-                    }
                     
-                    // Aplica a transferência
-                    for (const [originCompany, transferAmount] of Object.entries(transferBreakdown)) {
-                        payerBalance.from[originCompany] = (payerBalance.from[originCompany] || 0) - transferAmount;
-                        receiverBalance.from[originCompany] = (receiverBalance.from[originCompany] || 0) + transferAmount;
-                    }
-                    
-                    payerBalance.total -= amount;
-                    receiverBalance.total += amount;
-                }
-            });
-            
-            // 3. Aplicar Ajustes Manuais por cima dos cálculos
-            const adjustments = sortedTransactions.filter(t => t.type === 'adjustment');
-            
-            adjustments.forEach(adj => {
-                if (balances[adj.companyToAdjust] && balances[adj.companyToAdjust].from) {
-                    
-                    const source = adj.sourceToAdjust;
-                    const newAmount = adj.newAmount;
-                    
-                    // Pega o valor calculado ATUAL antes do ajuste
-                    const currentCalculatedAmount = balances[adj.companyToAdjust].from[source] || 0;
-                    
-                    // Calcula a diferença que esse ajuste vai introduzir
-                    const difference = newAmount - currentCalculatedAmount;
+                    if (totalPositiveFromInCents > 0) { 
+                        let distributedCents = 0;
+                        
+                        // Ordena para que a maior fonte pague qualquer diferença de arredondamento
+                        positiveSources.sort((a, b) => b[1] - a[1]); 
 
-                    // Aplica o novo valor (sobrescreve)
-                    balances[adj.companyToAdjust].from[source] = newAmount;
+                        positiveSources.forEach(([origin, originAmountInCents], index) => {
+                            let proportionalAmountInCents;
+                            if (index === positiveSources.length - 1) {
+                                // Garante que a soma total seja exata, alocando a diferença no último item
+                                proportionalAmountInCents = amountInCents - distributedCents;
+                            } else {
+                                proportionalAmountInCents = Math.round((originAmountInCents / totalPositiveFromInCents) * amountInCents);
+                            }
+                            
+                            transferBreakdown[origin] = (transferBreakdown[origin] || 0) + proportionalAmountInCents;
+                            distributedCents += proportionalAmountInCents;
+                        });
+
+                        for (const origin in transferBreakdown) {
+                            const transferAmountCents = transferBreakdown[origin];
+                            payerBalance.from[origin] = (payerBalance.from[origin] || 0) - transferAmountCents;
+                            receiverBalance.from[origin] = (receiverBalance.from[origin] || 0) + transferAmountCents;
+                        }
+                    } else {
+                        // Caso não tenha fundos positivos, a origem é a própria empresa (cenário de dívida)
+                        payerBalance.from[payerName] = (payerBalance.from[payerName] || 0) - amountInCents;
+                        receiverBalance.from[payerName] = (receiverBalance.from[payerName] || 0) + amountInCents;
+                    }
                     
-                    // Corrige o total da empresa com base na diferença introduzida
-                    balances[adj.companyToAdjust].total += difference;
+                    payerBalance.total -= amountInCents;
+                    receiverBalance.total += amountInCents;
                 }
             });
-            
-            return balances;
+
+            // Converte de centavos para Reais (float) no final
+            const finalBalances = {};
+            for (const companyName in balances) {
+                finalBalances[companyName] = {
+                    total: centsToFloat(balances[companyName].total),
+                    from: {}
+                };
+                for (const sourceName in balances[companyName].from) {
+                    finalBalances[companyName].from[sourceName] = centsToFloat(balances[companyName].from[sourceName]);
+                }
+            }
+            return finalBalances;
         }
+
 
         function renderCompanyList() {
             companyList.innerHTML = companies.length > 0 
@@ -762,9 +761,30 @@
             filterReceiver.innerHTML = '<option value="">Todas</option>' + optionsHTML;
         }
 
-        /* REMOVIDO - Função não é mais necessária
-        // ...
-        */
+        function renderContributions(balances) {
+            contributionSummaryList.innerHTML = ''; // Limpa o resumo de aportes
+            
+            companies.forEach(company => {
+                // O total aportado é o valor que a empresa tem na sua própria origem
+                const totalContribution = transactions
+                    .filter(t => t.type === 'contribution' && t.receiver === company.name)
+                    .reduce((sum, t) => sum + t.amount, 0);
+
+                // Atualiza o resumo no painel 2
+                contributionSummaryList.innerHTML += `
+                    <li class="flex justify-between items-center bg-gray-50 p-2 rounded">
+                        <span class="text-gray-700">${company.name}</span>
+                        <span class="font-medium ${totalContribution > 0 ? 'text-green-600' : 'text-gray-500'}">
+                            ${formatCurrency(totalContribution)}
+                        </span>
+                    </li>
+                `;
+            });
+
+            if (companies.length === 0) {
+                 contributionSummaryList.innerHTML = '<li class="text-gray-500">Nenhuma empresa cadastrada.</li>';
+            }
+        }
         
         function renderConsolidatedBalance(balances) {
             consolidatedBalance.innerHTML = Object.entries(balances).map(([name, data]) => {
@@ -786,14 +806,12 @@
                                 ${formatCurrency(data.total)}
                             </span>
                         </div>
-                        ${detailsHTML ? `
                         <div class="mt-4">
                            <button class="text-indigo-600 text-sm hover:underline" onclick="document.getElementById('${detailsId}').classList.toggle('hidden')">Ver Detalhes</button>
                            <ul id="${detailsId}" class="mt-2 space-y-1 text-sm hidden border-t pt-2">
-                                ${detailsHTML}
+                                ${detailsHTML.length > 0 ? detailsHTML : '<li class="text-gray-500">Nenhum detalhe de origem.</li>'}
                            </ul>
                         </div>
-                        ` : ''}
                     </div>
                 `;
             }).join('');
@@ -813,14 +831,10 @@
                 .forEach((t, index) => transactionNumbers.set(t.id, index + 1));
 
             const filteredTransactions = transactions.filter(t => {
-                const payerMatch = !payerFilter || t.payer === payerFilter;
+                const payerMatch = !payerFilter || t.payer === payerFilter || (t.type === 'adjustment' && t.companyToAdjust === payerFilter);
                 const receiverMatch = !receiverFilter || t.receiver === receiverFilter;
                 const invoiceMatch = !invoiceFilter || (t.invoice && t.invoice.toLowerCase().includes(invoiceFilter));
-                const typeMatch = !typeFilter 
-                    || (typeFilter === 'contribution' && t.type === 'contribution')
-                    || (typeFilter === 'withdrawal' && t.type === 'withdrawal') 
-                    || (typeFilter === 'payment' && (t.type === 'payment' || !t.type))
-                    || (typeFilter === 'adjustment' && t.type === 'adjustment');
+                const typeMatch = !typeFilter || (typeFilter === 'withdrawal' && t.type === 'withdrawal') || (typeFilter === 'payment' && (t.type === 'payment' || !t.type)) || (typeFilter === 'adjustment' && t.type === 'adjustment') || (typeFilter === 'contribution' && t.type === 'contribution');
                 
                 let dateMatch = true;
                 if (dateFilter && t.timestamp && t.timestamp.toDate) {
@@ -832,26 +846,26 @@
             }).sort((a, b) => (b.timestamp?.toDate() || 0) - (a.timestamp?.toDate() || 0)); 
 
             transactionHistory.innerHTML = filteredTransactions.map((t) => {
-                let payerCellHTML = t.payer;
-                let receiverCellHTML = t.receiver;
+                let payerCellHTML = t.payer || '---';
+                let receiverCellHTML = t.receiver || '---';
                 let amountCellHTML = formatCurrency(t.amount);
                 let descriptionText = t.description || '';
                 let rowClass = 'text-sm';
                 let editButtonHTML = '';
 
-                if (t.type === 'contribution') {
-                    rowClass = 'text-sm text-green-600'; // <-- COR ALTERADA
+                if(t.type === 'contribution') {
+                    rowClass = 'text-sm text-green-600';
+                    amountCellHTML = `+ ${formatCurrency(t.amount)}`;
                     payerCellHTML = 'Aporte Externo';
                     receiverCellHTML = t.receiver;
-                } else if (t.type === 'withdrawal') {
+                }
+                else if(t.type === 'withdrawal'){
                     rowClass = 'text-sm text-red-600';
-                    amountCellHTML = formatCurrency(t.amount);
-                    if(t.sourceBreakdown){
-                        const sourceDetails = Object.keys(t.sourceBreakdown)
-                            .map(source => `<span class="block text-xs text-gray-500">↳ Origem ${source}</span>`)
-                            .join('');
-                        payerCellHTML = `<div>${t.payer}${sourceDetails}</div>`;
-                    }
+                    amountCellHTML = `- ${formatCurrency(t.amount)}`;
+                    const sourceDetails = Object.keys(t.sourceBreakdown)
+                        .map(source => `<span class="block text-xs text-gray-500">↳ Origem ${source}</span>`)
+                        .join('');
+                    payerCellHTML = `<div>${t.payer}${sourceDetails}</div>`;
                 } else if (t.type === 'adjustment') {
                     rowClass = 'text-sm text-yellow-700';
                     payerCellHTML = 'Ajuste Manual';
@@ -871,12 +885,12 @@
                 <tr class="${rowClass}">
                     <td class="px-2 py-3 text-gray-500">${transactionNumbers.get(t.id)}</td>
                     <td class="px-4 py-3 text-gray-500">${formatTimestamp(t.timestamp)}</td>
-                    <td class="px-4 py-3">${payerCellHTML}</td>
-                    <td class="px-4 py-3">${receiverCellHTML}</td>
-                    <td class="px-4 py-3 font-medium ${t.type === 'withdrawal' ? 'text-red-600' : ''} ${t.type === 'adjustment' ? 'text-yellow-700' : ''}">${amountCellHTML}</td>
-                    <td class="px-4 py-3 text-gray-500">${t.invoice || ''}</td>
-                    <td class="px-4 py-3 text-gray-500" title="${descriptionText}">${descriptionText.substring(0,30)}${descriptionText.length > 30 ? '...' : ''}</td>
-                    <td class="px-4 py-3">
+                    <td class="px-4 py-3 align-top">${payerCellHTML}</td>
+                    <td class="px-4 py-3 align-top">${receiverCellHTML}</td>
+                    <td class="px-4 py-3 align-top font-medium">${amountCellHTML}</td>
+                    <td class="px-4 py-3 align-top text-gray-500">${t.invoice || ''}</td>
+                    <td class="px-4 py-3 align-top text-gray-500" title="${descriptionText}">${descriptionText.substring(0,30)}${descriptionText.length > 30 ? '...' : ''}</td>
+                    <td class="px-4 py-3 align-top">
                         <div class="flex items-center space-x-3">
                              ${editButtonHTML}
                             <button data-id="${t.id}" class="delete-transaction-btn text-red-600 hover:text-red-800" title="Excluir">
@@ -887,19 +901,13 @@
                 </tr>
                 `}).join('');
 
-            const totalPayments = filteredTransactions.filter(t => (t.type === 'payment' || !t.type)).reduce((sum, t) => sum + t.amount, 0);
-            const totalContributions = filteredTransactions.filter(t => t.type === 'contribution').reduce((sum, t) => sum + t.amount, 0);
+            const totalAmount = filteredTransactions.filter(t => (t.type === 'payment' || !t.type)).reduce((sum, t) => sum + t.amount, 0);
             const totalWithdrawals = filteredTransactions.filter(t => t.type === 'withdrawal').reduce((sum, t) => sum + t.amount, 0);
 
             transactionHistoryFooter.innerHTML = `
-                 <tr class="text-green-600"> <!-- <-- COR ALTERADA -->
-                    <td colspan="4" class="px-4 py-3 text-right">Total de Aportes:</td>
-                    <td class="px-4 py-3">${formatCurrency(totalContributions)}</td>
-                    <td colspan="3"></td>
-                </tr>
                 <tr>
                     <td colspan="4" class="px-4 py-3 text-right">Total de Pagamentos:</td>
-                    <td class="px-4 py-3">${formatCurrency(totalPayments)}</td>
+                    <td class="px-4 py-3">${formatCurrency(totalAmount)}</td>
                     <td colspan="3"></td>
                 </tr>
                  <tr class="text-red-600">
@@ -953,30 +961,6 @@
                     `;
                 }).join('');
         }
-        
-        // NOVO: Renderiza o resumo de aportes
-        function renderContributionSummary(balances) {
-             if (companies.length === 0) {
-                contributionSummaryList.innerHTML = '<li class="text-gray-500">Nenhuma empresa cadastrada.</li>';
-                return;
-            }
-
-            const summaryHTML = companies.map(company => {
-                // O aporte total de uma empresa é o valor que ela tem na origem "ela mesma"
-                const totalContributed = balances[company.name]?.from?.[company.name] || 0;
-                
-                return `
-                    <li class="flex justify-between items-center bg-gray-50 p-2 rounded">
-                        <span class="text-gray-700">${company.name}</span>
-                        <span class="font-medium ${totalContributed > 0 ? 'text-green-600' : 'text-gray-500'}"> <!-- <-- COR ALTERADA -->
-                            ${formatCurrency(totalContributed)}
-                        </span>
-                    </li>
-                `;
-            }).join('');
-            
-            contributionSummaryList.innerHTML = summaryHTML;
-        }
 
 
         function getChartColors(numColors) {
@@ -993,14 +977,14 @@
                 allocationChart.destroy();
             }
             
-            const contributionTransactions = transactions.filter(t => t.type === 'contribution' && t.amount > 0);
-            if (contributionTransactions.length === 0) {
+            const contributionSources = [...new Set(transactions.filter(t => t.type === 'contribution').map(t => t.receiver))].sort();
+            
+            if (contributionSources.length === 0) {
                  if (ctx) ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
                 return;
             }
 
-            // Os labels são as empresas que receberam aportes (a origem é ela mesma)
-            const labels = [...new Set(contributionTransactions.map(c => c.receiver))].sort();
+            const labels = contributionSources;
             const locationCompanies = [...new Set(companies.map(c => c.name))];
             
             const colors = getChartColors(locationCompanies.length);
@@ -1088,7 +1072,7 @@
         addTransactionBtn.addEventListener('click', async () => {
             const payer = payerSelect.value;
             const receiver = receiverSelect.value;
-            const amount = unformatCurrency(transactionAmountInput.value);
+            const amount = centsToFloat(unformatCurrency(transactionAmountInput.value)); // Converte centavos para float
             const invoice = invoiceNumberInput.value.trim();
             const description = transactionDescriptionInput.value.trim();
 
@@ -1114,17 +1098,21 @@
         // NOVO: Listener para Lançar Aporte
         addContributionBtn.addEventListener('click', async () => {
             const receiver = contributionCompanySelect.value;
-            const amount = unformatCurrency(contributionAmountInput.value);
-            const description = contributionDescriptionInput.value.trim();
+            const amount = centsToFloat(unformatCurrency(contributionAmountInput.value)); // Converte centavos para float
+            let description = contributionDescriptionInput.value.trim();
 
             if (!receiver || amount <= 0) {
                 alert('Selecione uma empresa e insira um valor de aporte válido.');
                 return;
             }
+            
+            if (description === '') {
+                description = 'Aporte de capital';
+            }
 
             await addDoc(collection(db, 'transactions'), {
                 type: 'contribution',
-                payer: 'Aporte', // Identificador de aporte
+                payer: 'Aporte Externo', // Identificador de aporte
                 receiver: receiver,
                 amount: amount,
                 description: description,
@@ -1134,17 +1122,13 @@
             // Limpa o formulário
             contributionAmountInput.value = '';
             contributionDescriptionInput.value = '';
+            contributionCompanySelect.value = ''; // Limpa o select
         });
-
-
-        /* REMOVIDO - Listener antigo de aportes
-        // ...
-        */
         
         transactionAmountInput.addEventListener('input', () => formatCurrencyInput(transactionAmountInput));
         editTransactionAmountInput.addEventListener('input', () => formatCurrencyInput(editTransactionAmountInput));
-        contributionAmountInput.addEventListener('input', () => formatCurrencyInput(contributionAmountInput)); // NOVO
-        adjustAmountInput.addEventListener('input', () => formatCurrencyInput(adjustAmountInput)); // NOVO
+        contributionAmountInput.addEventListener('input', () => formatCurrencyInput(contributionAmountInput)); 
+        adjustAmountInput.addEventListener('input', () => formatCurrencyInput(adjustAmountInput)); 
 
 
         filterPayer.addEventListener('change', renderTransactionHistory);
@@ -1209,7 +1193,7 @@
             if (!transactionToDeleteId) return;
 
             const password = deleteTransactionPasswordInput.value;
-            // ATENÇÃO: Senha hardcoded. Use um sistema de autenticação real.
+            // ATENÇÃO: Senha hardcoded.
             if(password !== 'Pipueca') {
                 deleteTransactionError.classList.remove('hidden');
                 return;
@@ -1236,7 +1220,7 @@
             
             const payer = editPayerSelect.value;
             const receiver = editReceiverSelect.value;
-            const amount = unformatCurrency(editTransactionAmountInput.value);
+            const amount = centsToFloat(unformatCurrency(editTransactionAmountInput.value)); // Converte centavos para float
             const invoice = editInvoiceNumberInput.value.trim();
             const description = editTransactionDescriptionInput.value.trim();
 
@@ -1271,23 +1255,36 @@
 
             deleteCompanyError.classList.add('hidden');
             const name = companyToDelete.name;
-
-            // Deleta transações relacionadas (aportes, pagamentos, saques, ajustes)
-            const relatedTransactions = transactions.filter(t => 
-                t.payer === name || 
-                t.receiver === name || 
-                t.companyToAdjust === name || 
-                t.sourceToAdjust === name
-            );
-            const transactionDeletions = relatedTransactions.map(t => deleteDoc(doc(db, "transactions", t.id)));
-            await Promise.all(transactionDeletions);
-
-            /* REMOVIDO - Aportes antigos estão em 'contributions'
-            // ...
-            */
             
+            const batch = writeBatch(db);
+
             // Deleta a empresa
-            await deleteDoc(doc(db, "companies", companyToDelete.id));
+            batch.delete(doc(db, "companies", companyToDelete.id));
+
+            // Deleta transações relacionadas
+            const transactionsRef = collection(db, "transactions");
+            const qPayer = query(transactionsRef, where("payer", "==", name));
+            const qReceiver = query(transactionsRef, where("receiver", "==", name));
+            const qContrib = query(transactionsRef, where("type", "==", "contribution"), where("receiver", "==", name));
+            const qWithdraw = query(transactionsRef, where("type", "==", "withdrawal"), where("payer", "==", name));
+            const qAdjust = query(transactionsRef, where("type", "==", "adjustment"), where("companyToAdjust", "==", name));
+            const qAdjustSource = query(transactionsRef, where("type", "==", "adjustment"), where("sourceToAdjust", "==", name));
+
+            const [
+                payerSnap, receiverSnap, contribSnap, withdrawSnap, adjustSnap, adjustSourceSnap
+            ] = await Promise.all([
+                getDocs(qPayer), getDocs(qReceiver), getDocs(qContrib),
+                getDocs(qWithdraw), getDocs(qAdjust), getDocs(qAdjustSource)
+            ]);
+
+            payerSnap.forEach(d => batch.delete(d.ref));
+            receiverSnap.forEach(d => batch.delete(d.ref));
+            contribSnap.forEach(d => batch.delete(d.ref));
+            withdrawSnap.forEach(d => batch.delete(d.ref));
+            adjustSnap.forEach(d => batch.delete(d.ref));
+            adjustSourceSnap.forEach(d => batch.delete(d.ref));
+            
+            await batch.commit();
 
             companyToDelete = null;
             deleteCompanyModal.style.display = 'none';
@@ -1313,21 +1310,16 @@
             }
             
             resetError.classList.add('hidden');
-            // 'contributions' pode precisar ser mantido se houver dados antigos
-            const collectionsToDelete = ['transactions', 'companies']; 
+            const collectionsToDelete = ['transactions', 'companies'];
             
             for (const collName of collectionsToDelete) {
                 const querySnapshot = await getDocs(collection(db, collName));
-                for (const docSnapshot of querySnapshot.docs) {
-                    await deleteDoc(doc(db, collName, docSnapshot.id));
-                }
+                const batch = writeBatch(db);
+                querySnapshot.forEach(doc => {
+                    batch.delete(doc.ref);
+                });
+                await batch.commit();
             }
-            // Opcional: Limpar a coleção 'contributions' antiga também
-            const oldContributions = await getDocs(collection(db, 'contributions'));
-             for (const docSnapshot of oldContributions.docs) {
-                await deleteDoc(doc(db, 'contributions', docSnapshot.id));
-            }
-            
             
             resetModal.style.display = 'none';
         });
@@ -1390,10 +1382,10 @@
             sourceInputs.forEach(input => {
                 const sourceName = input.dataset.source;
                 const maxAmount = parseFloat(input.dataset.max);
-                const amount = unformatCurrency(input.value);
+                const amount = centsToFloat(unformatCurrency(input.value)); // Converte de centavos para float
 
                 if(amount > 0) {
-                    if (amount > maxAmount + 0.01) { // Adiciona tolerância para ponto flutuante
+                    if (amount > maxAmount + 0.01) { // Add tolerance for floating point
                         alert(`O valor de saque da fonte ${sourceName} (${formatCurrency(amount)}) não pode exceder o valor disponível (${formatCurrency(maxAmount)}).`);
                         hasError = true;
                     }
@@ -1426,7 +1418,7 @@
             addWithdrawalBtn.classList.add('hidden');
             withdrawalDescriptionInput.value = '';
         });
-
+        
         // --- Lógica do Painel de Ajuste Manual ---
         
         function updateAdjustSourceSelect(balances) {
@@ -1472,7 +1464,7 @@
         addAdjustmentBtn.addEventListener('click', async () => {
             const companyToAdjust = adjustCompanySelect.value;
             const sourceToAdjust = adjustSourceSelect.value;
-            const newAmount = unformatCurrency(adjustAmountInput.value);
+            const newAmount = centsToFloat(unformatCurrency(adjustAmountInput.value)); // Converte centavos para float
             const description = adjustDescriptionInput.value.trim();
             const password = adjustPasswordInput.value;
 
@@ -1509,5 +1501,4 @@
     </script>
 </body>
 </html>
-
 
